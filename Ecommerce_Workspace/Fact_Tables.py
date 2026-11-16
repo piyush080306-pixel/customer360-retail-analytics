@@ -47,7 +47,9 @@ fact_order_data = silver.select(
     "OrderDayOfWeek",
     "IsDiscounted",
     "Weekend",
-    "Value_Orders"
+    "Value_Orders",
+    col("Weather_Condition").alias("Weather_Condition"),
+    col("Weather_Temp_C").alias("Weather_Temp_C"),
 )
 
 fact_order_data.limit(20).display()
@@ -194,3 +196,30 @@ dim_device.write \
 print("dim_device:", dim_device.count())
 
 spark.sql("SELECT * FROM ecommerce_catalog.gold.dim_device")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### NEW: Weather Dimension (Third Data Source)
+# COMMAND ----------
+
+has_weather = "Weather_Condition" in orders_silver.columns
+
+if has_weather:
+    dim_weather = orders_silver.select(
+        "Weather_Condition",
+        "Weather_Temp_C",
+        "Weather_Humidity",
+        "Weather_Wind_Speed",
+    ).dropDuplicates(["Weather_Condition"]) \
+     .withColumn("weather_key", row_number().over(Window.orderBy("Weather_Condition")))
+
+    dim_weather.write \
+        .format("delta") \
+        .mode("overwrite") \
+        .saveAsTable("ecommerce_catalog.gold.dim_weather")
+
+    print("dim_weather:", dim_weather.count())
+    spark.sql("SELECT * FROM ecommerce_catalog.gold.dim_weather")
+else:
+    print("Skipping dim_weather: weather columns not present in Silver.")

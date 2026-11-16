@@ -112,6 +112,29 @@ gold_device_type = silver.groupBy("DeviceType") \
 gold_device_type.display()
 
 # COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### NEW: Weather-based Sales Analysis (Third Data Source)
+# COMMAND ----------
+
+has_weather = "Weather_Condition" in silver.columns
+
+if has_weather:
+    gold_weather_sales = silver.groupBy("Weather_Condition") \
+        .agg(
+            count("OrderID").alias("Total_Orders"),
+            round(sum("FinalAmount"), 2).alias("Total_Revenue"),
+            round(avg("FinalAmount"), 2).alias("Avg_Order_Value"),
+            round(avg("Weather_Temp_C"), 2).alias("Avg_Temperature_C")
+        ) \
+        .orderBy(desc("Total_Revenue"))
+
+    gold_weather_sales.display()
+else:
+    print("Skipping gold_weather_sales: Weather_Condition column not present in Silver.")
+    gold_weather_sales = None
+
+# COMMAND ----------
 # MAGIC %md
 # MAGIC ### Write Gold Tables to Delta & Unity Catalog
 # COMMAND ----------
@@ -127,6 +150,9 @@ gold_tables = {
     "gold_payment_method": gold_payment_method,
     "gold_device_type": gold_device_type,
 }
+
+if has_weather and gold_weather_sales is not None:
+    gold_tables["gold_weather_sales"] = gold_weather_sales
 
 for table_name, df in gold_tables.items():
     path = f"{gold_base}/{table_name}"

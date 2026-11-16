@@ -16,13 +16,15 @@ sql_server = dbutils.widgets.get("sql_server")
 sql_database = dbutils.widgets.get("sql_database")
 
 bronze_path = f"abfss://bronze@{storage_account}.dfs.core.windows.net/ecommerce/ecommerce_data"
+weather_bronze_path = f"abfss://bronze@{storage_account}.dfs.core.windows.net/ecommerce/weather_data"
 silver_path = f"abfss://silver@{storage_account}.dfs.core.windows.net/ecommerce_orders"
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ### Layer 2: Data Engineering (Silver) - Read Bronze & Azure SQL
+# MAGIC ### Layer 2: Data Engineering (Silver) - Read Bronze & Third Sources
 # COMMAND ----------
 
+# 1. Orders from Bronze (Delta)
 orders_df = spark.read.format("delta") \
     .load(bronze_path)
 
@@ -30,7 +32,7 @@ orders_df.limit(5).display()
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ### Loading Customer Master from Azure SQL Database
+# MAGIC ### 2. Customer Master from Azure SQL Database
 # COMMAND ----------
 
 sql_username = dbutils.secrets.get(scope="azure-sql", key="username")
@@ -57,6 +59,23 @@ customers_df.limit(5).display()
 
 # COMMAND ----------
 # MAGIC %md
+# MAGIC ### 3. Weather Data from Bronze (Third Data Source - OpenWeatherMap API)
+# COMMAND ----------
+
+# Weather CSV extracted via weather_extraction.py and staged in Bronze container.
+# Joined on City to enrich orders with weather context.
+try:
+    weather_df = spark.read.format("csv") \
+        .option("header", "true") \
+        .option("inferSchema", "true") \
+        .load(weather_bronze_path)
+    weather_df.limit(5).display()
+except Exception as e:
+    print(f"WARNING: Weather data not available in Bronze ({e}). Proceeding without weather enrichment.")
+    weather_df = None
+
+# COMMAND ----------
+# MAGIC %md
 # MAGIC ### Join Ecommerce Data with Customer Master
 # COMMAND ----------
 
@@ -68,6 +87,20 @@ merged_data = orders_df.join(
     orders_df["CustomerID"] == customers_df["customer_id"],
     how="left"
 ).drop(customers_df["customer_id"])
+
+merged_data.limit(5).display()
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ### Enrich with Weather Data (Third Source)
+# COMMAND ----------
+
+if weather_df is not None:
+    merged_data = merged_data.join(
+        weather_df,
+        merged_data["City"] == weather_df["City"],
+        how="left"
+    ).drop(weather_df["City"])
 
 merged_data.limit(5).display()
 
@@ -103,6 +136,7 @@ unmatched_orders = total_rows - matched_customers
 null_order_ids = silver.filter(col("OrderID").isNull()).count()
 invalid_quantity = silver.filter(col("Quantity") <= 0).count()
 negative_final_amount = silver.filter(col("FinalAmount") < 0).count()
+weather_nulls = silver.filter(col("Weather_Condition").isNull()).count() if "Weather_Condition" in silver.columns else 0
 
 print(f"Silver rows total: {total_rows}")
 print(f"Matched customers: {matched_customers}")
@@ -110,6 +144,7 @@ print(f"Unmatched orders: {unmatched_orders}")
 print(f"Orders with null OrderID: {null_order_ids}")
 print(f"Orders with invalid Quantity (<=0): {invalid_quantity}")
 print(f"Orders with negative FinalAmount: {negative_final_amount}")
+print(f"Orders with missing weather data: {weather_nulls}")
 
 silver.display()
 
