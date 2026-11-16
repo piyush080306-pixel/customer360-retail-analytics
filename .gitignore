@@ -1,0 +1,21 @@
+# Databricks
+*.ipynb_checkpoints
+.dbx/
+.databricks/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+
+# Logs
+*.log
